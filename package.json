@@ -17,6 +17,7 @@
         "test-browserunit": "karma start build/karma.conf.js",
         "test-functional": "node test/functional/runTests.js --selenium=remote --app=remote",
         "test-functional-mocha": "karma start karma.functional.conf.js --testsuite=content.js",
+        "test-functional-mocha-selenium": "karma start karma.conf.seleniumgrid.cjs",
         "prepare": "node githook.js",
         "prepack": "npm run build"
     },
