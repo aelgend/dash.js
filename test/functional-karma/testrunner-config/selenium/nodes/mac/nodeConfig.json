@@ -1,0 +1,26 @@
+{
+  "capabilities": [
+    {
+      "browserName": "firefox",
+      "acceptSslCerts": true,
+      "takesScreenshot": false,
+      "seleniumProtocol": "WebDriver",
+      "platform": "MAC",
+      "maxInstances": 1,
+      "cleanSession": true
+    },
+    {
+      "browserName": "chrome",
+      "maxInstances": 1,
+      "platform": "MAC"
+    },
+    {
+      "browserName": "safari",
+      "platform": "MAC",
+      "maxInstances": 1
+    }
+  ],
+  "_comment": "Configuration for MAC Node",
+  "register": true,
+  "maxSession": 3
+}

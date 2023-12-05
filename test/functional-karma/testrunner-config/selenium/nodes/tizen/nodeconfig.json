@@ -1,0 +1,17 @@
+{
+  "capabilities": [
+    {
+      "browserName": "tizen",
+      "seleniumProtocol": "WebDriver",
+      "hostname": "10.147.67.211:26101",
+      "version": 2022,
+      "wake-on-lan-address": "10.147.67.211:26101"
+    }
+  ],
+  "browserName": "tizen",
+  "maxSession": 1,
+  "hostname": "10.147.67.211:26101",
+  "wake-on-lan-address": "10.147.67.211:26101",
+  "version": 2022,
+  "hub": "http://10.147.67.104:4444"
+}

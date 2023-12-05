@@ -1,0 +1,125 @@
+# General Selenium Grid
+general:
+  gridConfig:
+    hostname: 192.168.178.29
+    port: 4444
+
+
+# A set of variables to contain repeated configurations which can then be
+# referenced below.  The syntax for the variable is "name: &name", which
+# generates an "anchor" with the given name.  Later, you can inject the
+# contents of the variable with "*name".
+vars:
+  firefox_config: &firefox_config
+    moz:firefoxOptions:
+      # Override Firefox default preferences in the temporary profile created
+      # for each test run.
+      # args:
+      #  - "-profile /Users/danielsilhavy/WebstormProjects/dashjs-karma-tests/selenium/firefox/profile"
+      prefs:
+        # Overrides Selenium's explicit default setting, to allow Firefox to
+        # install the Widevine CDM on demand.
+        media.gmp-manager.updateEnabled: true
+        # Overrides Firefox's Linux-specific default setting to disable DRM.
+        media.eme.enabled: true
+
+  minimum_chrome_args: &minimum_chrome_args
+    # On Chrome m59+ we can test EME on platforms with pop-up prompts, such as
+    # Android and ChromeOS.  Note that this flag does not take a port number
+    # (domain vs origin).
+    # This flag requires setting --user-data-dir as well, however, webdriver
+    # already takes care of that for us (except on Android).
+    - "--unsafely-allow-protected-media-identifier-for-domain=192.168.178.78"
+    # Normally, Chrome disallows autoplaying videos in many cases.  Enable it
+    # for testing.
+    - "--autoplay-policy=no-user-gesture-required"
+    - "--allow-running-insecure-content"
+    - "--ignore-certificate-errors"
+    - "--disable-web-security"
+
+  minimum_chrome_android_args: &minimum_chrome_android_args
+    # There is no way in YAML to natively merge arrays, so we start by
+    # duplicating the flags from minimum_chrome_args above.
+    - "--autoplay-policy=no-user-gesture-required"
+    # On Android we must set --user-data-dir.  WebDriver does not do it for
+    # us as it does on other platforms.  Without --user-data-dir,
+    # --unsafely-allow... does not work.
+    - "--user-data-dir=/data/data/com.android.chrome/cache"
+
+  chrome_config: &chrome_config
+    goog:chromeOptions:
+      args: *minimum_chrome_args
+
+      # Instruct chromedriver not to disable component updater. The
+      # component updater must run in order for the Widevine CDM to be
+      # available when using a new user-data-dir.
+      # TODO(http://crbug.com/613581): Remove once Chrome bug is fixed.
+      excludeSwitches:
+        - "disable-component-update"
+
+  chrome_android_config: &chrome_android_config
+    goog:chromeOptions:
+      args: *minimum_chrome_android_args
+
+      # Once the new session request reaches chromedriver, it will take
+      # the androidPackage option as a request to start Chrome through
+      # adb on the tethered device.
+      #appPackage: com.android.chrome
+
+browsers:
+  ChromeMac:
+    browser: chrome
+    os: Mac
+    parameters: *chrome_config
+    excluded: true
+
+  FirefoxMac:
+    browser: firefox
+    os: Mac
+    parameters: *firefox_config
+    excluded: true
+
+  Safari:
+    browser: safari
+    os: Mac
+    excluded: true
+
+  ChromeWindows:
+    browser: chrome
+    os: Windows
+    parameters: *chrome_config
+    excluded: true
+
+  FirefoxWindows:
+    browser: firefox
+    os: Windows
+    parameters: *firefox_config
+    excluded: true
+
+  Edge:
+    browser: msedge
+    os: Windows
+    excluded: true
+
+  ChromeLinux:
+    browser: chrome
+    os: Linux
+    parameters: *chrome_config
+    excluded: true
+
+  FirefoxLinux:
+    browser: firefox
+    os: Linux
+    parameters: *firefox_config
+    excluded: true
+
+  ChromeAndroid:
+    browser: Chrome
+    os: Android
+    parameters: *chrome_android_config
+    excluded: false
+
+  Tizen:
+    browser: tizen
+    excluded: true
+    version: 2022
