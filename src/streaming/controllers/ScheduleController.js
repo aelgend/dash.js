@@ -238,9 +238,13 @@ function ScheduleController(config) {
         if (!type || !currentRepresentationInfo) {
             return true;
         }
-        const segmentDuration = currentRepresentationInfo && currentRepresentationInfo.segmentDuration && !isNaN(currentRepresentationInfo.segmentDuration) ? currentRepresentationInfo.segmentDuration : 0;
+        let segmentDurationToAddToBufferLevel = currentRepresentationInfo && currentRepresentationInfo.segmentDuration && !isNaN(currentRepresentationInfo.segmentDuration) ? currentRepresentationInfo.segmentDuration : 0;
         const bufferLevel = dashMetrics.getCurrentBufferLevel(type);
-        return bufferLevel + segmentDuration < getBufferTarget();
+        const bufferTarget = getBufferTarget();
+        if (bufferTarget <= segmentDurationToAddToBufferLevel) {
+            segmentDurationToAddToBufferLevel = 0;
+        }
+        return bufferLevel + segmentDurationToAddToBufferLevel < getBufferTarget();
     }
 
     /**
