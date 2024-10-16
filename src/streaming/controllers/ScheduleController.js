@@ -239,7 +239,7 @@ function ScheduleController(config) {
             return true;
         }
         const bufferLevel = dashMetrics.getCurrentBufferLevel(type);
-        return bufferLevel < getBufferTarget();
+        return bufferLevel + currentRepresentationInfo.fragmentDuration < getBufferTarget();
     }
 
     /**

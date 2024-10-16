@@ -19,7 +19,7 @@ const config = merge(common, {
         open: ['samples/index.html'],
         hot: true,
         compress: true,
-        port: 3000
+        port: 5000
     }
 });
 

@@ -36,6 +36,8 @@ angular.module('DashIFTestVectorsService', ['ngResource']).factory('dashifTestVe
 app.controller('DashController', ['$scope', '$window', 'sources', 'contributors', 'dashifTestVectors', function ($scope, $window, sources, contributors, dashifTestVectors) {
     $scope.selectedItem = {
         url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd'
+        // url: 'https://34.148.101.172/manifest.mpd'
+        // url: 'https://172.26.192.1:8080/manifest.mpd'
     };
 
     sources.query(function (data) {
@@ -183,6 +185,7 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
     $scope.additionalAbrRules = {};
     $scope.mediaSettingsCacheEnabled = true;
     $scope.metricsTimer = null;
+    $scope.eventPoller = null;
     $scope.updateMetricsInterval = 1000;
     $scope.drmKeySystems = ['com.widevine.alpha', 'com.microsoft.playready', 'org.w3.clearkey'];
     $scope.drmKeySystem = '';
@@ -413,6 +416,7 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
         document.getElementById('never-replace-audio').checked = true;
     }
 
+    // eslint-disable-next-line no-undef
     $scope.controlbar = new ControlBar($scope.player); /* jshint ignore:line */
     $scope.controlbar.initialize();
     $scope.controlbar.disable();
@@ -444,7 +448,9 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
         $scope.safeApply();
     }, $scope);
 
+    let timeToStart = 0
     $scope.player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function (e) { /* jshint ignore:line */
+        console.log('Stream initialized')
         stopMetricsInterval();
         $scope.videoQualities = $scope.player.getBitrateInfoListFor('video');
         $scope.chartCount = 0;
@@ -453,7 +459,20 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
             updateMetrics('audio');
             $scope.chartCount++;
         }, $scope.updateMetricsInterval);
+        localStorage.removeItem('metrics');
+        timeToStart = Date.now()
+        console.log('Time to start = ' + timeToStart)
     }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.PLAYBACK_PLAYING, function (e) {
+        if ($scope.eventPoller == null) {
+            timeToStart = (Date.now() - timeToStart) / 1000
+            console.log('Duration for starting = ' + timeToStart)
+            $scope.eventPoller = setInterval(function () {
+                collectMetrics()
+            }, 1000);
+        }
+    })
 
     $scope.player.on(dashjs.MediaPlayer.events.PLAYBACK_ENDED, function (e) { /* jshint ignore:line */
         if ($('#loop-cb').is(':checked') &&
@@ -488,6 +507,334 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
             }
         }
     }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.THROUGHPUT_MEASUREMENT_STORED, function (e) {
+        if (e.mediaType === 'video') {
+            // console.log('THROUGHPUT_MEASUREMENT_STORED: ' + JSON.stringify(e))
+        }
+    }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_REQUESTED, function (e) {
+        // console.log('QUALITY_CHANGE_REQUESTED: ' + JSON.stringify(e))
+    }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, function (e) {
+        // console.log('QUALITY_CHANGE_RENDERED: ' + JSON.stringify(e))
+    }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.REPRESENTATION_SWITCH, function (e) {
+        // console.log('REPRESENTATION_SWITCH: ' + JSON.stringify(e))
+    }, $scope);
+
+    $scope.player.on(dashjs.MediaPlayer.events.FRAGMENT_LOADING_ABANDONED, function (e) {
+        // console.log('FRAGMENT_LOADING_ABANDONED: ' + JSON.stringify(e))
+    }, $scope);
+
+    // Listen for the BUFFER_EMPTY event to track rebuffering occurrences
+    let rebufferCount = 0;
+    let rebufferStartTime = 0;
+    let totalRebufferDuration = 0;
+    let ongoingRebufferDuration = 0; // Track if rebuffering is ongoing
+    let isBufferEmpty = false
+    let loggingData = {}
+    $scope.player.on(dashjs.MediaPlayer.events.BUFFER_EMPTY, function(e) {
+        console.log('BUFFER EMPTY: ' + JSON.stringify(e))
+        if (e.mediaType === 'video') {
+            // Reset queue when buffer is empty
+            // fragmentQueue = [];
+            isBufferEmpty = true
+            rebufferCount++;
+            rebufferStartTime = Date.now(); // Record the time when rebuffering starts
+            console.log('Rebuffering occurred. Total rebuffer count:', rebufferCount);
+        }
+    });
+
+    // Listen for the BUFFER_LOADED or PLAYBACK_PLAYING event to track when the video starts again
+    $scope.player.on(dashjs.MediaPlayer.events.BUFFER_LOADED, function(e) {
+        console.log('BUFFER_LOADED: ' + JSON.stringify(e))
+        if (e.mediaType === 'video') {
+            isBufferEmpty = false
+        }
+        if (rebufferStartTime > 0) {
+            const rebufferDuration = (Date.now() - rebufferStartTime) / 1000; // Calculate rebuffer time in seconds
+            totalRebufferDuration += rebufferDuration;
+            console.log('Video resumed. Rebuffer duration (seconds):', totalRebufferDuration);
+            rebufferStartTime = 0; // Reset rebuffer start time
+        }
+    });
+
+    // Define variables to store the current bitrate and the time it's held for
+    let currentBandwidth = 0;
+    let timeElapsed = 0;
+    let fragmentDurationInSeconds = 0; // The fragment represents x seconds of video
+
+    let fragmentQueue = []; // Queue to store fragments
+    $scope.player.on(dashjs.MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, function(e) {
+        const request = e.request;
+        fragmentDurationInSeconds = request.duration
+        // Check if the necessary fields are populated
+        // if (request.mediaType === 'video' && request.requestStartDate && request.requestEndDate && request.bytesTotal) {
+        if (request.mediaType === 'video' && request.type === 'MediaSegment' && request.requestStartDate && request.requestEndDate && request.bytesTotal) {
+            // console.log(request)
+            // Calculate the total download time (in seconds)
+            const downloadTimeInSeconds = (request.requestEndDate - request.requestStartDate) / 1000;
+            const downloadTimeNoLatency = (request.requestEndDate - request.firstByteDate) / 1000;
+
+            // Get the fragment size in bits (bytes * 8)
+            const fragmentSizeInBits = request.bytesTotal * 8;
+
+            // Calculate the bitrate for the entire fragment (kbits per second)
+            currentBandwidth = Math.round((fragmentSizeInBits / 1000) / downloadTimeInSeconds)
+            let currentBandwidthNoLatency = Math.round((fragmentSizeInBits / 1000) / downloadTimeNoLatency)
+            // console.log(currentBitrate)
+
+            // Add the fragment's bandwidth and duration to the queue
+            for (let i = 1; i <= fragmentDurationInSeconds; i++) {
+                fragmentQueue.push({
+                    bandwidth: currentBandwidth
+                });
+            }
+
+            // Reset the elapsed time
+            timeElapsed = 0;
+
+            // console.log(`New fragment downloaded. Bitrate for next ${fragmentDurationInSeconds} seconds:`, currentBandwidth, 'bps');
+            // console.log(`New no latency fragment. Bitrate for next ${fragmentDurationInSeconds} seconds:`, currentBandwidthNoLatency, 'bps');
+
+            // const totalBytes = request.bytesTotal; // Size of the fragment in bytes
+            // const fragmentDuration = request.duration; // Duration of the fragment in seconds
+            //
+            // const requestStartTime = request.requestStartDate.getTime();
+            // const requestEndTime = request.requestEndDate.getTime();
+            // const firstByteDate = request.firstByteDate.getTime();
+            //
+            // // Calculate download time in seconds
+            // const downloadDuration = (requestEndTime - requestStartTime) / 1000;
+            // const latencyDuration = (firstByteDate - requestStartTime) / 1000;
+            //
+            // if (downloadDuration > 0) {
+            //     // Calculate the bandwidth in bits per second (kbps)
+            //     const bandwidth = Math.round(((totalBytes * 8) / 1000) / downloadDuration); // Convert bytes to bits and divide by time
+            //
+            //     // Add the fragment's bandwidth and duration to the queue
+            //     for (let i = 1; i <= fragmentDuration; i++) {
+            //         fragmentQueue.push({
+            //             bandwidth: bandwidth,
+            //             latency: latencyDuration
+            //         });
+            //     }
+            //
+            //     // console.log(`Bandwidth for fragment: ${bandwidth} bps`);
+            //     // console.log(`Fragment duration: ${fragmentDuration} seconds`);
+            // }
+        }
+    });
+
+    var lastDecodedByteCount = 0;
+    function collectMetrics() {
+
+        var streamInfo = $scope.player.getActiveStream().getStreamInfo();
+        var dashMetrics = $scope.player.getDashMetrics();
+        var dashAdapter = $scope.player.getDashAdapter();
+
+        if (dashMetrics && streamInfo) {
+            // Reset the bitrate to 0 if no new fragment arrives within 4 seconds
+            if (timeElapsed >= fragmentDurationInSeconds || isBufferEmpty || dashMetrics.getCurrentBufferLevel('video', true) === 0) {
+                currentBandwidth = 0;
+                // console.log('No new fragment, bitrate reset to 0');
+            }
+
+            // Increment the elapsed time
+            timeElapsed++;
+
+            let fragmentBandwidth = 0
+            // let latency = 0
+            if (fragmentQueue.length > 0) {
+                // Get the fragment at the front of the queue
+                // if (isBufferEmpty || dashMetrics.getCurrentBufferLevel('video', true) === 0) {
+                //     fragmentQueue = []
+                //     fragmentBandwidth = 0
+                //     // latency = 0
+                // } else {
+                fragmentBandwidth = fragmentQueue[0].bandwidth;
+                // latency = fragmentQueue[0].latency;
+                fragmentQueue.shift(); // Remove the first fragment from the queue
+                // }
+            } else {
+                // No fragments loaded, report 0 bandwidth for this second
+                fragmentBandwidth = 0
+                // latency = 0
+            }
+
+            const periodIdx = streamInfo.index;
+            var repSwitch = dashMetrics.getCurrentRepresentationSwitch('video', true);
+            var bufferLevel = dashMetrics.getCurrentBufferLevel('video', true);
+            var bitrate = repSwitch ? Math.round(dashAdapter.getBandwidthForRepresentation(repSwitch.to, periodIdx) / 1000) : NaN;
+            var adaptation = dashAdapter.getAdaptationForType(periodIdx, 'video', streamInfo);
+            var currentRep = adaptation.Representation_asArray.find(function (rep) {
+                return rep.id === repSwitch.to
+            })
+            var frameRate = currentRep.frameRate;
+            var resolution = currentRep.width + 'x' + currentRep.height;
+
+            // var request = dashMetrics.getCurrentHttpRequest('video')
+            // console.log(request)
+            // var downloadTime = (request._tfinish.getTime() - request.tresponse.getTime()) / 1000; // in seconds
+            // var downloadSize = request._responseHeaders.match(/content-length:\s*(\d+)/i)[1] / 1000; // in KB
+            //
+            // if (downloadTime > 0) {
+            //     var kbps = Math.round((downloadSize * 8) / downloadTime);
+            // }
+            // var requests = dashMetrics.getHttpRequests('video');
+            // if (requests.length > 0) {
+            //     var lastRequest = requests[requests.length - 1];
+            //     console.log(lastRequest)
+            //     var downloadTime = (lastRequest._tfinish.getTime() - lastRequest.tresponse.getTime()) / 1000; // in seconds
+            //     var downloadSize = lastRequest._responseHeaders.match(/content-length:\s*(\d+)/i)[1] / 1000; // in KB
+            //
+            //     if (downloadTime > 0) {
+            //         var kbps = Math.round((downloadSize * 8) / downloadTime);
+            //     }
+            // }
+
+            document.getElementById('bufferLevel').innerText = bufferLevel + ' secs';
+            document.getElementById('framerate').innerText = frameRate + ' fps';
+            document.getElementById('reportedBitrate').innerText = bitrate + ' Kbps';
+            // document.getElementById('currentBandwidth').innerText = currentBandwidth + ' Kbps';
+            // document.getElementById('fragmentBandwidth').innerText = fragmentBandwidth + ' Kbps';
+            document.getElementById('resolution').innerText = resolution;
+            if ($scope.video.webkitVideoDecodedByteCount !== undefined) {
+                const bitrateInterval = 1;
+                var calculatedBitrate = ((($scope.video.webkitVideoDecodedByteCount - lastDecodedByteCount) / 1000) * 8) / bitrateInterval;
+                document.getElementById('calculatedBitrate').innerText = Math.round(calculatedBitrate) + ' Kbps';
+                lastDecodedByteCount = $scope.video.webkitVideoDecodedByteCount;
+                // console.log('$scope.video.webkitVideoDecodedByteCount = ' + $scope.video.webkitVideoDecodedByteCount)
+            } else {
+                document.getElementById('chrome-only').style.display = 'none';
+            }
+
+
+            loggingData = {
+                timeToStart: timeToStart,
+                bufferLevel: bufferLevel,
+                bitrate: calculatedBitrate,
+                currentBandwidth: currentBandwidth,
+                fragmentBandwidth: fragmentBandwidth,
+                // tffb: latency,
+                // realBitrate: currentBitrate,
+                // frameRate: frameRate,
+                resolution: resolution,
+                // throughput: throughput,
+                // latency: latency,
+                // fragmentSize: fragmentSize,
+                // downloadTime: downloadTime,
+                // mediaType: request.mediaType,
+                // mediaStartTime: request.mediaStartTime,
+                rebufferings: rebufferCount,
+                rebufferDuration: totalRebufferDuration
+                // timestamp: new Date(request.requestEndDate)
+            }
+            // Store Metrics
+            logAndStoreMetrics(loggingData);
+        }
+    }
+
+    // Function to log and store metrics in localStorage
+    function logAndStoreMetrics(metricsData) {
+        var metrics = JSON.parse(localStorage.getItem('metrics')) || [];
+        metrics.push({
+            timeToStart: metricsData.timeToStart,
+            bufferLevel: metricsData.bufferLevel,
+            bitrate: metricsData.bitrate,
+            currentBandwidth: metricsData.currentBandwidth,
+            fragmentBandwidth: metricsData.fragmentBandwidth,
+            // tffb: metricsData.tffb,
+            // frameRate: metricsData.frameRate,
+            resolution: metricsData.resolution,
+            // throughput: metricsData.throughput,
+            // latency: metricsData.latency,
+            // fragmentSize: metricsData.fragmentSize,
+            // downloadTime: metricsData.downloadTime,
+            // mediaType: metricsData.mediaType,
+            // mediaStartTime: metricsData.mediaStartTime,
+            rebufferings: metricsData.rebufferings,
+            rebufferDuration: metricsData.rebufferDuration
+            // timestamp: metricsData.timestamp
+        });
+        localStorage.setItem('metrics', JSON.stringify(metrics));
+    }
+
+    // Function to download stored metrics (Optional)
+    document.getElementById('downloadMetrics').addEventListener('click', function() {
+        var metrics = JSON.parse(localStorage.getItem('metrics')) || [];
+        var dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(metrics));
+        var downloadAnchorNode = document.createElement('a');
+        var currentABRStrategy = $scope.player.getSettings().streaming.abr.ABRStrategy;
+        // console.log('Current ABR Strategy: ', currentABRStrategy);
+        downloadAnchorNode.setAttribute('href', dataStr);
+        downloadAnchorNode.setAttribute('download', currentABRStrategy + '-metrics.json');
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+    });
+
+
+    // let numOfFragments = 0;
+    // $scope.player.on(dashjs.MediaPlayer.events.VIDEO_CHUNK_RECEIVED, function (e) {
+    //     var dashMetrics = $scope.player.getDashMetrics();
+    //     var dashAdapter = $scope.player.getDashAdapter();
+    //     var request = e.request;
+    //
+    //     // Only check video segments
+    //     if (request && request.mediaType === 'video' && request.type === 'MediaSegment') {
+    //         console.log(request)
+    //         // Calculate throughput (bits per second)
+    //         var fragmentSize = request.bytesLoaded; // in bytes
+    //         var downloadTime = Math.abs(new Date(request.requestEndDate) - new Date(request.firstByteDate)) / 1000;
+    //         var throughput = (fragmentSize * 8) / downloadTime; // Convert to bits and calculate throughput (bits per second)
+    //
+    //         // Calculate latency (time from request start to first byte received)
+    //         var latency = Math.abs(new Date(request.firstByteDate) - new Date(request.requestStartDate)) / 1000;
+    //
+    //         // Other metrics
+    //         const periodIdx = request.mediaInfo.streamInfo.index;
+    //         var repSwitch = dashMetrics.getCurrentRepresentationSwitch(request.mediaType, true);
+    //         var bufferLevel = dashMetrics.getCurrentBufferLevel(request.mediaType, true);
+    //         var bitrate = repSwitch ? Math.round(dashAdapter.getBandwidthForRepresentation(repSwitch.to, periodIdx) / 1000) : NaN;
+    //         var adaptation = dashAdapter.getAdaptationForType(periodIdx, request.mediaType, request.mediaInfo.streamInfo);
+    //         var currentRep = adaptation.Representation_asArray.find(function (rep) {
+    //             return rep.id === repSwitch.to;
+    //         });
+    //         var frameRate = currentRep.frameRate;
+    //         var resolution = currentRep.width + 'x' + currentRep.height;
+    //
+    //         // Update UI (Optional)
+    //         // document.getElementById('bufferLevel').innerText = bufferLevel + ' secs';
+    //         // document.getElementById('framerate').innerText = frameRate + ' fps';
+    //         // document.getElementById('reportedBitrate').innerText = bitrate + ' Kbps';
+    //         // document.getElementById('resolution').innerText = resolution;
+    //
+    //         // Store Metrics
+    //         logAndStoreMetrics({
+    //             bufferLevel: bufferLevel,
+    //             bitrate: bitrate,
+    //             frameRate: frameRate,
+    //             resolution: resolution,
+    //             throughput: throughput,
+    //             latency: latency,
+    //             // fragmentSize: fragmentSize,
+    //             downloadTime: downloadTime,
+    //             // mediaType: request.mediaType,
+    //             mediaStartTime: request.mediaStartTime,
+    //             rebufferings: rebufferCount
+    //             // timestamp: new Date(request.requestEndDate)
+    //         });
+    //
+    //         numOfFragments += 1
+    //         console.log('Downloaded video fragment number: ' + numOfFragments)
+    //     }
+    // });
+    //
 
     ////////////////////////////////////////
     //
@@ -1109,6 +1456,37 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
         $scope.player.attachSource(null);
         $scope.controlbar.reset();
         $scope.conformanceViolations = [];
+        // Check if rebuffering was ongoing at the time of submission
+        if (rebufferStartTime > 0) {
+            // console.log('#################### here')
+            ongoingRebufferDuration = (Date.now() - rebufferStartTime) / 1000;
+            totalRebufferDuration += ongoingRebufferDuration;
+            // console.log('#################### totalRebufferDuration = ' + totalRebufferDuration)
+            rebufferStartTime = 0; // Reset rebuffer start time
+        }
+
+        if (JSON.stringify(loggingData) !== '{}') {
+            // console.log('$$$$$$$$$$$$$$$ HERE')
+            logAndStoreMetrics({
+                timeToStart: loggingData.timeToStart,
+                bufferLevel: loggingData.bufferLevel,
+                bitrate: loggingData.bitrate,
+                currentBandwidth: loggingData.currentBandwidth,
+                fragmentBandwidth: loggingData.fragmentBandwidth,
+                // tffb: loggingData.tffb,
+                // frameRate: frameRate,
+                resolution: loggingData.resolution,
+                // throughput: throughput,
+                // latency: latency,
+                // fragmentSize: fragmentSize,
+                // downloadTime: downloadTime,
+                // mediaType: request.mediaType,
+                // mediaStartTime: request.mediaStartTime,
+                rebufferings: rebufferCount,
+                rebufferDuration: totalRebufferDuration
+                // timestamp: new Date(request.requestEndDate)
+            });
+        }
         stopMetricsInterval();
     };
 
@@ -1147,6 +1525,7 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
     };
 
     $scope.setCmcdMode = function () {
+        // eslint-disable-next-line no-undef
         var mode = $('input[name=\'cmcd-mode\']:checked').val();
         switch (mode) {
             case 'query':
@@ -1227,6 +1606,7 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
                             }
                         }
 
+                        // eslint-disable-next-line no-undef
                         if (!angular.equals(input.httpRequestHeaders, {})) {
                             protectionData[input.drmKeySystem]['httpRequestHeaders'] = input.httpRequestHeaders;
                         }
@@ -1809,8 +2189,8 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
                     $scope.muted = this.parseBoolean(value);
                     $scope.toggleMuted();
                     if ($scope.muted === true){
-                        document.getElementById('muteBtn')?.click();    
-                    } 
+                        document.getElementById('muteBtn')?.click();
+                    }
                     break;
                 case 'drmToday':
                     $scope.drmToday = this.parseBoolean(value);
@@ -1879,8 +2259,8 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
         else if (value === 'null') typedValue = null;
         else if (value === 'undefined') typedValue = undefined;
         else integerRegEx.test(value) ? typedValue = parseInt(value) :
-                (floatRegEx.test(value) ? typedValue = parseFloat(value) :
-                    typedValue = value);
+            (floatRegEx.test(value) ? typedValue = parseFloat(value) :
+                typedValue = value);
 
         return typedValue;
     }
@@ -1908,6 +2288,9 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
     };
 
     function calculateHTTPMetrics(type, requests) {
+        // console.log('############## calculateHTTPMetrics ##################')
+        // console.log(requests)
+        // console.log('############## calculateHTTPMetrics ##################')
         var latency = {},
             download = {},
             ratio = {},
@@ -2111,6 +2494,10 @@ app.controller('DashController', ['$scope', '$window', 'sources', 'contributors'
         if ($scope.metricsTimer) {
             clearInterval($scope.metricsTimer);
             $scope.metricsTimer = null;
+        }
+        if ($scope.eventPoller) {
+            clearInterval($scope.eventPoller);
+            $scope.eventPoller = null;
         }
     }
 

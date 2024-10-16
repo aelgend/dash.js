@@ -1080,6 +1080,36 @@
                                        data-placement="top"
                                        title="Playback rate">Playback rate:</label> {{videoPlaybackRate}}
                             </div>
+                            <div class="col-md-12">
+                                <div class="p-5 border rounded-3">
+                                    <h4>Metrics</h4>
+                                    <button id="downloadMetrics">Download Metrics</button>
+                                    <div>
+                                        <strong>Reported bitrate:</strong>
+                                        <span id="reportedBitrate"></span>
+                                        <br/>
+                                        <strong>Buffer level:</strong>
+                                        <span id="bufferLevel"></span>
+                                        <div id="chrome-only">
+                                            <strong>Calculated bitrate:</strong>
+                                            <span id="calculatedBitrate"></span>
+                                        </div>
+                                        <div>
+                                            <strong>Current bitrate:</strong>
+                                            <span id="currentBandwidth"></span>
+                                        </div>
+                                        <div>
+                                            <strong>Fragment Bitrate:</strong>
+                                            <span id="fragmentBandwidth"></span>
+                                        </div>
+                                        <strong>Framerate:</strong>
+                                        <span id="framerate"></span>
+                                        </br>
+                                        <strong>Resolution:</strong>
+                                        <span id="resolution"></span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="tab-pane fade" id="audioStatsTab">
